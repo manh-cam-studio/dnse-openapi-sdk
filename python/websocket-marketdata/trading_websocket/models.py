@@ -46,8 +46,8 @@ class PriceLevel:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PriceLevel":
         return cls(
-            price=data.get("Price") or data.get("price"),
-            quantity=data.get("qtty") or data.get("Qtty")
+            price=data.get("price"),
+            quantity=data.get("qtty")
         )
 
 
@@ -69,18 +69,18 @@ class Trade:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Trade":
         return cls(
-            marketId=data.get("market_id", 0) or data.get("MarketId", 0),
-            boardId=data.get("board_id", 0) or data.get("BoardId", 0),
-            isin=data.get("isin", "") or data.get("Isin", ""),
-            symbol=data.get("Symbol") or data.get("symbol"),
-            price=data.get("MatchPrice", 0.0) or data.get("match_price", 0.0),
-            quantity=data.get("MatchQtty", 0) or data.get("match_qtty", 0),
-            totalVolumeTraded=data.get("TotalVolumeTraded", 0) or data.get("total_volume_traded", 0),
-            grossTradeAmount=data.get("GrossTradeAmount", 0) or data.get("gross_trade_amount", 0),
-            highestPrice=data.get("HighestPrice", 0) or data.get("highest_price", 0),
-            lowestPrice=data.get("LowestPrice", 0) or data.get("lowest_price", 0),
-            openPrice=data.get("OpenPrice", 0) or data.get("open_price", 0),
-            tradingSessionId=data.get("TradingSessionId", 0) or data.get("trading_session_id", 0),
+            marketId=data.get("market_id"),
+            boardId=data.get("board_id"),
+            isin=data.get("isin"),
+            symbol=data.get("symbol"),
+            price=data.get("match_price"),
+            quantity=data.get("match_qtty"),
+            totalVolumeTraded=data.get("total_volume_traded"),
+            grossTradeAmount=data.get("gross_trade_amount"),
+            highestPrice=data.get("highest_price"),
+            lowestPrice=data.get("lowest_price"),
+            openPrice=data.get("open_price"),
+            tradingSessionId=data.get("trading_session_id"),
         )
 
 
@@ -104,20 +104,20 @@ class TradeExtra:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TradeExtra":
         return cls(
-            marketId=data.get("market_id", 0) or data.get("MarketId", 0),
-            boardId=data.get("board_id", 0) or data.get("BoardId", 0),
-            isin=data.get("isin", "") or data.get("Isin", ""),
-            symbol=data.get("Symbol") or data.get("symbol"),
-            price=data.get("MatchPrice", 0.0) or data.get("match_price", 0.0),
-            quantity=data.get("MatchQtty", 0) or data.get("match_qtty", 0),
-            side=data.get("Side", 0) or data.get("side", 0),
-            avgPrice=data.get("AvgPrice", 0) or data.get("avg_price", 0),
-            totalVolumeTraded=data.get("TotalVolumeTraded", 0) or data.get("total_volume_traded", 0),
-            grossTradeAmount=data.get("GrossTradeAmount", 0) or data.get("gross_trade_amount", 0),
-            highestPrice=data.get("HighestPrice", 0) or data.get("highest_price", 0),
-            lowestPrice=data.get("LowestPrice", 0) or data.get("lowest_price", 0),
-            openPrice=data.get("OpenPrice", 0) or data.get("open_price", 0),
-            tradingSessionId=data.get("TradingSessionId", 0) or data.get("trading_session_id", 0),
+            marketId=data.get("market_id"),
+            boardId=data.get("board_id"),
+            isin=data.get("isin"),
+            symbol=data.get("symbol"),
+            price=data.get("match_price"),
+            quantity=data.get("match_qtty"),
+            side=data.get("side",),
+            avgPrice=data.get("avg_price"),
+            totalVolumeTraded=data.get("total_volume_traded"),
+            grossTradeAmount=data.get("gross_trade_amount"),
+            highestPrice=data.get("highest_price"),
+            lowestPrice=data.get("lowest_price"),
+            openPrice=data.get("open_price"),
+            tradingSessionId=data.get("trading_session_id"),
         )
 
 
@@ -162,49 +162,33 @@ class MarketIndex:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MarketIndex":
         return cls(
-            index_name=data.get("IndexName") or data.get("index_name"),
-            changed_ratio=data.get("ChangedRatio") or data.get("changed_ratio"),
-            changed_value=data.get("ChangedValue") or data.get("changed_value"),
-
-            fluctuation_steadiness_issue_count=data.get("FluctuationSteadinessIssueCount") or data.get(
-                "fluctuation_steadiness_issue_count"),
-            fluctuation_down_issue_count=data.get("FluctuationDownIssueCount") or data.get(
-                "fluctuation_down_issue_count"),
-            fluctuation_up_issue_count=data.get("FluctuationUpIssueCount") or data.get(
-                "fluctuation_up_issue_count"),
-            fluctuation_lower_limit_issue_count=data.get("FluctuationLowerLimitIssueCount") or data.get(
-                "fluctuation_lower_limit_issue_count"),
-            fluctuation_upper_limit_issue_count=data.get("FluctuationUpperLimitIssueCount") or data.get(
-                "fluctuation_upper_limit_issue_count"),
-
-            fluctuation_down_issue_volume=data.get("FluctuationDownIssueVolume") or data.get(
-                "fluctuation_down_issue_volume"),
-            fluctuation_up_issue_volume=data.get("FluctuationUpIssueVolume") or data.get(
-                "fluctuation_up_issue_volume"),
-            fluctuation_steadiness_issue_volume=data.get("FluctuationSteadinessIssueVolume") or data.get(
-                "fluctuation_steadiness_issue_volume"),
-
-            currency_code=data.get("CurrencyCode") or data.get("currency_code"),
-            index_type_code=data.get("IndexTypeCode") or data.get("index_type_code"),
-
-            lowest_value_indexes=data.get("LowestValueIndexes") or data.get("lowest_value_indexes"),
-            highest_value_indexes=data.get("HighestValueIndexes") or data.get("highest_value_indexes"),
-            prior_value_indexes=data.get("PriorValueIndexes") or data.get("prior_value_indexes"),
-            value_indexes=data.get("ValueIndexes") or data.get("value_indexes"),
-
-            contauct_acc_trd_val=data.get("ContauctAccTrdVal") or data.get("contauct_acc_trd_val"),
-            contauct_acc_trd_vol=data.get("ContauctAccTrdVol") or data.get("contauct_acc_trd_vol"),
-            blk_trd_acc_trd_val=data.get("BlkTrdAccTrdVal") or data.get("blk_trd_acc_trd_val"),
-            blk_trd_acc_trd_vol=data.get("BlkTrdAccTrdVol") or data.get("blk_trd_acc_trd_vol"),
-
-            gross_trade_amount=data.get("GrossTradeAmount") or data.get("gross_trade_amount"),
-            total_volume_traded=data.get("TotalVolumeTraded") or data.get("total_volume_traded"),
-
-            market_index_class=data.get("MarketIndexClass") or data.get("market_index_class"),
-            market_id=data.get("MarketId") or data.get("market_id"),
-            trading_session_id=data.get("TradingSessionId") or data.get("trading_session_id"),
-
-            transact_time=proto_timestamp_to_str(data.get("TransactTime") or data.get("transact_time")),
+            index_name=data.get("index_name"),
+            changed_ratio=data.get("changed_ratio"),
+            changed_value=data.get("changed_value"),
+            fluctuation_steadiness_issue_count=data.get("fluctuation_steadiness_issue_count"),
+            fluctuation_down_issue_count=data.get("fluctuation_down_issue_count"),
+            fluctuation_up_issue_count=data.get("fluctuation_up_issue_count"),
+            fluctuation_lower_limit_issue_count=data.get("fluctuation_lower_limit_issue_count"),
+            fluctuation_upper_limit_issue_count=data.get("fluctuation_upper_limit_issue_count"),
+            fluctuation_down_issue_volume=data.get("fluctuation_down_issue_volume"),
+            fluctuation_up_issue_volume=data.get("fluctuation_up_issue_volume"),
+            fluctuation_steadiness_issue_volume=data.get("fluctuation_steadiness_issue_volume"),
+            currency_code=data.get("currency_code"),
+            index_type_code=data.get("index_type_code"),
+            lowest_value_indexes=data.get("lowest_value_indexes"),
+            highest_value_indexes=data.get("highest_value_indexes"),
+            prior_value_indexes=data.get("prior_value_indexes"),
+            value_indexes=data.get("value_indexes"),
+            contauct_acc_trd_val=data.get("contauct_acc_trd_val"),
+            contauct_acc_trd_vol=data.get("contauct_acc_trd_vol"),
+            blk_trd_acc_trd_val=data.get("blk_trd_acc_trd_val"),
+            blk_trd_acc_trd_vol=data.get("blk_trd_acc_trd_vol"),
+            gross_trade_amount=data.get("gross_trade_amount"),
+            total_volume_traded=data.get("total_volume_traded"),
+            market_index_class=data.get("market_index_class"),
+            market_id=data.get("market_id"),
+            trading_session_id=data.get("trading_session_id"),
+            transact_time=proto_timestamp_to_str(data.get("transact_time")),
         )
 
 
@@ -221,13 +205,13 @@ class ExpectedPrice:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ExpectedPrice":
         return cls(
-            marketId=data.get("market_id", 0) or data.get("MarketId", 0),
-            boardId=data.get("board_id", 0) or data.get("BoardId", 0),
-            isin=data.get("isin", "") or data.get("Isin", ""),
-            symbol=data.get("Symbol") or data.get("symbol"),
-            closePrice=data.get("close_price", 0.0) or data.get("ClosePrice", 0),
-            expectedTradePrice=data.get("expected_trade_price", 0.0) or data.get("ExpectedTradePrice", 0.0),
-            expectedTradeQuantity=data.get("expected_trade_quantity", 0) or data.get("ExpectedTradeQuantity", 0)
+            marketId=data.get("market_id"),
+            boardId=data.get("board_id"),
+            isin=data.get("isin"),
+            symbol=data.get("symbol"),
+            closePrice=data.get("close_price"),
+            expectedTradePrice=data.get("expected_trade_price"),
+            expectedTradeQuantity=data.get("expected_trade_quantity")
         )
 
 
@@ -251,22 +235,20 @@ class SecurityDefinition:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SecurityDefinition":
         return cls(
-            symbol=data.get("symbol") or data.get("Symbol"),
-            marketId=data.get("market_id", 0) or data.get("MarketId", 0),
-            boardId=data.get("board_id", 0) or data.get("BoardId", 0),
-            isin=data.get("isin", "") or data.get("Isin", ""),
-            productGrpId=data.get("product_grp_id", 0) or data.get("ProductGrpId", 0),
-            securityGroupId=data.get("security_group_id", 0) or data.get("SecurityGroupId", 0),
-            basicPrice=data.get("basic_price", 0.0) or data.get("BasicPrice", 0.0),
-            ceilingPrice=data.get("ceiling_price", 0.0) or data.get("CeilingPrice", 0.0),
-            floorPrice=data.get("floor_price", 0.0) or data.get("FloorPrice", 0.0),
-            openInterestQuantity=data.get("open_interest_quantity", 0) or data.get("OpenInterestQuantity", 0),
-            securityStatus=data.get("security_status", 0) or data.get("SecurityStatus", 0),
-            symbolAdminStatusCode=data.get("symbol_admin_status_code", 0) or data.get("SymbolAdminStatusCode", 0),
-            symbolTradingMethodStatusCode=data.get("symbol_trading_method_status_code", 0) or data.get(
-                "SymbolTradingMethodStatusCode", 0),
-            symbolTradingSanctionStatusCode=data.get("symbol_trading_sanction_status_code", 0) or data.get(
-                "SymbolTradingSanctionStatusCode", 0)
+            symbol=data.get("symbol"),
+            marketId=data.get("market_id"),
+            boardId=data.get("board_id"),
+            isin=data.get("isin"),
+            productGrpId=data.get("product_grp_id"),
+            securityGroupId=data.get("security_group_id"),
+            basicPrice=data.get("basic_price",),
+            ceilingPrice=data.get("ceiling_price"),
+            floorPrice=data.get("floor_price",),
+            openInterestQuantity=data.get("open_interest_quantity"),
+            securityStatus=data.get("security_status"),
+            symbolAdminStatusCode=data.get("symbol_admin_status_code"),
+            symbolTradingMethodStatusCode=data.get("symbol_trading_method_status_code"),
+            symbolTradingSanctionStatusCode=data.get("symbol_trading_sanction_status_code")
         )
 
 
@@ -284,22 +266,22 @@ class Quote:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Quote":
         # Parse bids array
-        bids_data = data.get("Bid") or data.get("bid") or []
+        bids_data = data.get("bid") or []
         bids = [PriceLevel.from_dict(level) for level in bids_data]
 
         # Parse asks array
-        offer_data = data.get("Offer") or data.get("offer") or []
+        offer_data = data.get("offer") or []
         offers = [PriceLevel.from_dict(level) for level in offer_data]
 
         return cls(
-            symbol=data.get("Symbol") or data.get("symbol"),
-            marketId=data.get("market_id", 0) or data.get("MarketId", 0),
-            boardId=data.get("board_id", 0) or data.get("BoardId", 0),
-            isin=data.get("isin", "") or data.get("Isin", ""),
+            symbol=data.get("symbol"),
+            marketId=data.get("market_id"),
+            boardId=data.get("board_id"),
+            isin=data.get("isin", ""),
             bid=bids,
             offer=offers,
-            totalOfferQtty=data.get("total_offer_qtty") or data.get("TotalOfferQtty"),
-            totalBidQtty=data.get("total_bid_qtty") or data.get("TotalBidQtty"),
+            totalOfferQtty=data.get("total_offer_qtty"),
+            totalBidQtty=data.get("total_bid_qtty"),
         )
 
     @property
@@ -327,10 +309,10 @@ class Quote:
 class Ohlc:
     symbol: str
     resolution: int
-    open: Decimal
-    high: Decimal
-    low: Decimal
-    close: Decimal
+    open: float
+    high: float
+    low: float
+    close: float
     volume: int
     time: int
     lastUpdated: int
@@ -338,17 +320,23 @@ class Ohlc:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Ohlc":
+        # Helper function to round to 2 decimal places (standard rounding)
+        def round_value(value) -> float:
+            if value is None:
+                return 0.0
+            return round(float(value), 2)
+
         return cls(
-            symbol=data.get("symbol") or data.get("Symbol"),
-            resolution=data.get("resolution") or data.get("Resolution"),
-            open=data.get("open") or data.get("Open"),
-            high=data.get("high") or data.get("High"),
-            low=data.get("low") or data.get("Low"),
-            close=data.get("close") or data.get("Close"),
-            volume=data.get("volume") or data.get("Volume"),
-            time=data.get("time") or data.get("Time"),
-            type=data.get("type") or data.get("Type"),
-            lastUpdated=data.get("lastUpdated") or data.get("LastUpdated")
+            symbol=data.get("symbol"),
+            resolution=data.get("resolution"),
+            open=round_value(data.get("open")),
+            high=round_value(data.get("high")),
+            low=round_value(data.get("low")),
+            close=round_value(data.get("close")),
+            volume=data.get("volume"),
+            time=data.get("time"),
+            type=data.get("type"),
+            lastUpdated=data.get("lastUpdated")
         )
 
 

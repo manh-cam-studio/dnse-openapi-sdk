@@ -75,7 +75,7 @@ class WebSocketConnection:
                                        ping_interval=30,
                                        ping_timeout=30,
                                        close_timeout=10,
-                                       max_queue=None), timeout=self.timeout)
+                                       max_queue=512), timeout=self.timeout)
 
                 self._is_connected = True
                 self._retry_count = 0

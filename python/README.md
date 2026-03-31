@@ -80,8 +80,12 @@ python sdk/python/api/get_accounts.py
     - Demonstrates how to retrieve intraday order book.
 - `get_order_detail.py`
     - Demonstrates how to retrieve detailed information of a specific order (by ID).
-- `get_deals.py`
+- `get_positions.py`
     - Demonstrates how to retrieve current holding positions.
+- `get_positions_by_id.py`
+    - Demonstrates how to retrieve detailed information of a specific postion (by ID).
+- `close_position.py`
+    - Demonstrates how to close an existing position (by ID).
 - `get_order_history.py`
     - Demonstrates how to retrieve historical orders.
 - `send_email_otp.py`
@@ -99,6 +103,14 @@ python sdk/python/api/get_accounts.py
 
 - `sec_def.py`
     - Demonstrates how to receive securities definition updates.
+- `get_instruments.py`
+    - Demonstrates how to retrieve the list of available trading instruments and their metadata.
+- `get_trades.py`
+    - Demonstrates how to retrieve historical trade data for a specific instrument.
+- `get_latest_trade.py`
+    - Demonstrates how to retrieve the most recent trade for a specific instrument.
+- `get_ohlc.py`
+    - Demonstrates how to retrieve OHLC (Open, High, Low, Close) data for a specific instrument over a given time range.
 
 ### WebSocket Market Data
 

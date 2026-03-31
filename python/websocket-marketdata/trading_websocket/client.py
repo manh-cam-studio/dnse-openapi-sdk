@@ -35,6 +35,21 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+DEFAULT_BOARDS = ["G1", "G3", "G4", "G7", "T1", "T2", "T3", "T4", "T6"]
+
+_MSG_TYPE_MAP = {
+    "t":  ("trade", Trade),
+    "te": ("trade_extra", TradeExtra),
+    "e":  ("expected_price", ExpectedPrice),
+    "sd": ("security_definition", SecurityDefinition),
+    "q":  ("quote", Quote),
+    "b":  ("ohlc", Ohlc),
+    "o":  ("order", Order),
+    "p":  ("position", Position),
+    "mi": ("market_index", MarketIndex),
+    "a":  ("account", AccountUpdate),
+}
+
 
 class TradingClient:
     """
@@ -89,10 +104,11 @@ class TradingClient:
         self._encoder = MessageEncoder(encoding)
         self._decoder = MessageDecoder(encoding)
         self._event_handlers: Dict[str, List[Callable]] = {}
-        self._subscriptions: Dict[str, Dict[str, Any]] = {}  # channel -> {symbols, kwargs}
+        self._subscriptions: Dict[str, Dict[str, Any]] = {}
         self._is_authenticated = False
         self._session_id: Optional[str] = None
-        self._message_queue: asyncio.Queue = asyncio.Queue()
+        # Per-event queues: only created when needed (async iterator usage)
+        self._queues: Dict[str, asyncio.Queue] = {}
         self._is_running = False
         self._last_pong_time: float = 0.0
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -178,7 +194,7 @@ class TradingClient:
     async def subscribe_trades(
             self, symbols: List[str], on_trade: Optional[Callable[[Trade], None]] = None, encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
         for board in boards:
             channel = f"tick.{board}.json"
@@ -192,7 +208,7 @@ class TradingClient:
     async def subscribe_trade_extra(
             self, symbols: List[str], on_trade_extra: Optional[Callable[[TradeExtra], None]] = None, encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
         for board in boards:
             channel = f"tick_extra.{board}.json"
@@ -207,7 +223,7 @@ class TradingClient:
             self, symbols: List[str], on_expected_price: Optional[Callable[[ExpectedPrice], None]] = None,
             encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
         for board in boards:
             channel = f"expected_price.{board}.json"
@@ -221,7 +237,7 @@ class TradingClient:
     async def subscribe_sec_def(
             self, symbols: List[str], on_sec_def: Optional[Callable[[SecurityDefinition], None]] = None, encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
         for board in boards:
             channel = f"security_definition.{board}.json"
@@ -246,7 +262,7 @@ class TradingClient:
     async def subscribe_quotes(
             self, symbols: List[str], on_quote: Optional[Callable[[Quote], None]] = None, encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
+        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
         for board in boards:
             channel = f"top_price.{board}.json"
@@ -472,89 +488,56 @@ class TradingClient:
         return any(keyword in error_msg for keyword in connection_keywords)
 
     async def _dispatch_message(self, data: Dict[str, Any]) -> None:
-        """
-        Route message to appropriate handler.
-
-        Args:
-            data: Decoded message data
-        """
         action = data.get("action") or data.get("a")
-        msg_type = data.get("T")  # MessagePack type field
+        msg_type = data.get("T")
 
         if action == "subscribed":
             logger.debug(f"Subscription confirmed: {data}")
         elif action == "ping":
-            # Server sent ping, respond with pong
             logger.info("Received ping from server, sending pong")
-            pong_msg = self._encoder.encode({"action": "pong"})
-            await self._connection.send(pong_msg)
+            await self._connection.send(self._encoder.encode({"action": "pong"}))
         elif action == "pong":
-            # Update pong timestamp for health monitoring
             self._last_pong_time = time.time()
-            # logger.info("Received pong")
         elif action == "error":
             error_msg = data.get("message") or data.get("msg")
             logger.error(f"Server error: {error_msg}")
             self._emit("error", Exception(error_msg))
-        elif msg_type == "t":  # Trade
-            trade = Trade.from_dict(data)
-            self._emit("trade", trade)
-            await self._message_queue.put(trade)
-        elif msg_type == "te":  # Trade Extra
-            trade = TradeExtra.from_dict(data)
-            self._emit("trade_extra", trade)
-            await self._message_queue.put(trade)
-        elif msg_type == "e":  # Expected Price
-            expectedPrice = ExpectedPrice.from_dict(data)
-            self._emit("expected_price", expectedPrice)
-            await self._message_queue.put(expectedPrice)
-        elif msg_type == "sd":  # Security Definition
-            securityDefinition = SecurityDefinition.from_dict(data)
-            self._emit("security_definition", securityDefinition)
-            await self._message_queue.put(securityDefinition)
-        elif msg_type == "q":  # Quote
-            quote = Quote.from_dict(data)
-            self._emit("quote", quote)
-            await self._message_queue.put(quote)
-        elif msg_type == "b":  # ohlc
-            ohlc = Ohlc.from_dict(data)
-            self._emit("ohlc", ohlc)
-            await self._message_queue.put(ohlc)
-        elif msg_type == "o":  # Order
-            order = Order.from_dict(data)
-            self._emit("order", order)
-            await self._message_queue.put(order)
-        elif msg_type == "p":  # Position
-            position = Position.from_dict(data)
-            self._emit("position", position)
-            await self._message_queue.put(position)
-        elif msg_type == "mi":  # Position
-            position = MarketIndex.from_dict(data)
-            self._emit("market_index", position)
-            await self._message_queue.put(position)
-        elif msg_type == "a":  # Account
-            account = AccountUpdate.from_dict(data)
-            self._emit("account", account)
-            await self._message_queue.put(account)
+        elif msg_type in _MSG_TYPE_MAP:
+            event, model_cls = _MSG_TYPE_MAP[msg_type]
+            obj = model_cls.from_dict(data)
+            self._emit(event, obj)
+            # Only push to queue if no callback registered (using async iterator)
+            if event not in self._event_handlers:
+                if event in self._queues:
+                    await self._queues[event].put(obj)
+                if "*" in self._queues:
+                    await self._queues["*"].put(obj)
 
     def _emit(self, event: str, data: Any) -> None:
-        """
-        Call all registered handlers for event.
+        if event not in self._event_handlers:
+            return
+        for handler in self._event_handlers[event]:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    asyncio.ensure_future(handler(data))
+                else:
+                    handler(data)
+            except Exception as e:
+                logger.error(f"Handler error for {event}: {e}")
 
-        Args:
-            event: Event name
-            data: Event data
+    def queue(self, event: str) -> asyncio.Queue:
         """
-        if event in self._event_handlers:
-            for handler in self._event_handlers[event]:
-                try:
-                    # Support both sync and async handlers
-                    if asyncio.iscoroutinefunction(handler):
-                        asyncio.create_task(handler(data))
-                    else:
-                        handler(data)
-                except Exception as e:
-                    logger.error(f"Handler error for {event}: {e}")
+        Get (or create) a dedicated queue for a specific event type.
+        Use this when consuming messages via async iterator instead of callbacks.
+
+        Example:
+            q = client.queue("quote")
+            while True:
+                quote = await q.get()
+        """
+        if event not in self._queues:
+            self._queues[event] = asyncio.Queue()
+        return self._queues[event]
 
     async def _heartbeat_loop(self) -> None:
         while self._is_running and self._connection and self._connection.is_connected:
@@ -678,21 +661,16 @@ class TradingClient:
         await self.disconnect()
 
     def __aiter__(self):
-        """Allow async iteration over messages."""
+        """Allow async iteration over all messages via a shared queue."""
+        # Ensure a general queue exists for mixed iteration
+        self.queue("*")
         return self
 
     async def __anext__(self):
-        if not self._is_running:
-            raise StopAsyncIteration
-
-        try:
-            # Wait for next message with timeout to allow checking _is_running
-            message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
-            return message
-        except asyncio.TimeoutError:
-            # Check if still running
-            if self._is_running:
-                # Retry
-                return await self.__anext__()
-            else:
-                raise StopAsyncIteration
+        q = self._queues.get("*")
+        while self._is_running:
+            try:
+                return await asyncio.wait_for(q.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+        raise StopAsyncIteration
