@@ -201,6 +201,17 @@ class DNSEClient:
             dry_run=dry_run,
         )
 
+    def get_close_price(self, symbol, board_id=None, dry_run=False):
+        query = {}
+        if board_id is not None:
+            query["boardId"] = board_id
+        return self._request(
+            "GET",
+            f"/price/{symbol}/close",
+            query=query if query else None,
+            dry_run=dry_run,
+        )
+
     def post_order(self, market_type, payload, trading_token, order_category="NORMAL", dry_run=False):
         headers = {"trading-token": trading_token}
         query = {"marketType": market_type}
@@ -274,14 +285,13 @@ class DNSEClient:
             dry_run=dry_run,
         )
 
-    def close_position(self, position_id, market_type, payload, trading_token, dry_run=False):
+    def close_position(self, position_id, market_type, trading_token, dry_run=False):
         headers = {"trading-token": trading_token}
         query = {"marketType": market_type}
         return self._request(
             "POST",
             f"/accounts/positions/{position_id}/close",
             query=query,
-            body=payload,
             headers=headers,
             dry_run=dry_run,
         )

@@ -8,6 +8,7 @@ This example shows how to receive real-time market data for multiple symbols.
 """
 
 import asyncio
+from datetime import datetime
 
 from trading_websocket import TradingClient
 from trading_websocket.models import SecurityDefinition
@@ -24,7 +25,8 @@ async def main():
     )
 
     def handle_security_definition(sec_def: SecurityDefinition):
-        print(f"SECURITY DEFINITION: {sec_def}")
+        received_at = datetime.fromtimestamp(sec_def.receivedAt).strftime("%H:%M:%S.%f")[:-3] if sec_def.receivedAt else "N/A"
+        print(f"[{received_at}] SECURITY DEFINITION: {sec_def}")
 
     # Connect to gateway
     print("Connecting to WebSocket gateway...")

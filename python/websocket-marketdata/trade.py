@@ -8,6 +8,7 @@ This example shows how to receive real-time market data for multiple symbols.
 """
 
 import asyncio
+from datetime import datetime
 
 from trading_websocket import TradingClient
 from trading_websocket.models import Trade
@@ -24,15 +25,16 @@ async def main():
     )
 
     def handle_trade(trade: Trade):
-        print(f"TRADE: {trade}")
+        received_at = datetime.fromtimestamp(trade.receivedAt).strftime("%H:%M:%S.%f")[:-3] if trade.receivedAt else "N/A"
+        print(f"[{received_at}] TRADE: {trade}")
 
     # Connect to gateway
     print("Connecting to WebSocket gateway...")
     await client.connect()
     print(f"Connected! Session ID: {client._session_id}\n")
 
-    print("Subscribing to trades for SSI and 41I1G2000...")
-    await client.subscribe_trades(["SSI", "41I1G2000"], on_trade=handle_trade, encoding=encoding, board_id="G1")
+    print("Subscribing to trades for SSI and 41I1G4000...")
+    await client.subscribe_trades(["SSI", "41I1G4000"], on_trade=handle_trade, encoding=encoding, board_id="G1")
 
     print("\nReceiving market data (will run for 1 hour)...\n")
 

@@ -18,7 +18,7 @@ from .connection import WebSocketConnection
 from .auth import AuthManager
 from .encoding import MessageEncoder, MessageDecoder
 from .models import Trade, Quote, Ohlc, Order, Position, AccountUpdate, ExpectedPrice, SecurityDefinition, TradeExtra, \
-    MarketIndex
+    MarketIndex, ForeignInvestor
 from .exceptions import (
     AuthenticationError,
     ConnectionError,
@@ -38,16 +38,18 @@ if not logger.handlers:
 DEFAULT_BOARDS = ["G1", "G3", "G4", "G7", "T1", "T2", "T3", "T4", "T6"]
 
 _MSG_TYPE_MAP = {
-    "t":  ("trade", Trade),
+    "t": ("trade", Trade),
     "te": ("trade_extra", TradeExtra),
-    "e":  ("expected_price", ExpectedPrice),
+    "e": ("expected_price", ExpectedPrice),
     "sd": ("security_definition", SecurityDefinition),
-    "q":  ("quote", Quote),
-    "b":  ("ohlc", Ohlc),
-    "o":  ("order", Order),
-    "p":  ("position", Position),
+    "q": ("quote", Quote),
+    "b": ("ohlc", Ohlc),
+    "bc": ("ohlc_closed", Ohlc),
+    "o": ("order", Order),
+    "p": ("position", Position),
     "mi": ("market_index", MarketIndex),
     "a":  ("account", AccountUpdate),
+    "f": ("foreign", ForeignInvestor),
 }
 
 
@@ -109,10 +111,14 @@ class TradingClient:
         self._session_id: Optional[str] = None
         # Per-event queues: only created when needed (async iterator usage)
         self._queues: Dict[str, asyncio.Queue] = {}
+        # Internal dispatch queues: 1 queue per worker, symbol hashed to worker
+        self._dispatch_queues: List[asyncio.Queue] = []
         self._is_running = False
         self._last_pong_time: float = 0.0
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._message_handler_task: Optional[asyncio.Task] = None
+        self._dispatch_worker_tasks: List[asyncio.Task] = []
+        self._num_workers: int = 6  # 1 worker per symbol slot
 
     async def connect(self) -> None:
         """
@@ -154,7 +160,16 @@ class TradingClient:
         self._is_running = True
         self._last_pong_time = time.time()
 
-        # Start message handler
+        # Init 1 queue per worker slot
+        self._dispatch_queues = [asyncio.Queue() for _ in range(self._num_workers)]
+
+        # Start dispatch workers (1 per slot, same symbol → same worker → ordered)
+        self._dispatch_worker_tasks = [
+            asyncio.create_task(self._dispatch_worker(i))
+            for i in range(self._num_workers)
+        ]
+
+        # Start message handler (receive + decode only)
         self._message_handler_task = asyncio.create_task(self._message_handler())
 
         # Start heartbeat
@@ -206,7 +221,8 @@ class TradingClient:
             self.on("trade", on_trade)
 
     async def subscribe_trade_extra(
-            self, symbols: List[str], on_trade_extra: Optional[Callable[[TradeExtra], None]] = None, encoding="json", board_id=None
+            self, symbols: List[str], on_trade_extra: Optional[Callable[[TradeExtra], None]] = None, encoding="json",
+            board_id=None
     ) -> None:
         boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
@@ -235,7 +251,8 @@ class TradingClient:
             self.on("expected_price", on_expected_price)
 
     async def subscribe_sec_def(
-            self, symbols: List[str], on_sec_def: Optional[Callable[[SecurityDefinition], None]] = None, encoding="json", board_id=None
+            self, symbols: List[str], on_sec_def: Optional[Callable[[SecurityDefinition], None]] = None,
+            encoding="json", board_id=None
     ) -> None:
         boards = [board_id] if board_id is not None else DEFAULT_BOARDS
 
@@ -262,7 +279,7 @@ class TradingClient:
     async def subscribe_quotes(
             self, symbols: List[str], on_quote: Optional[Callable[[Quote], None]] = None, encoding="json", board_id=None
     ) -> None:
-        boards = [board_id] if board_id is not None else DEFAULT_BOARDS
+        boards = [board_id] if board_id is not None else ["G1", "G2", "G3", "G4", "G5", "G6", "G7"]
 
         for board in boards:
             channel = f"top_price.{board}.json"
@@ -273,19 +290,63 @@ class TradingClient:
         if on_quote:
             self.on("quote", on_quote)
 
+    async def subscribe_foreign_trading(
+            self, symbols: List[str], board_id: str = "*",
+            on_trade: Optional[Callable[[ForeignInvestor], None]] = None,
+            encoding="json"
+    ) -> None:
+        ext = "msgpack" if encoding == "msgpack" else "json"
+        channel = f"foreign.{board_id}.{ext}"
+        await self._subscribe_channel(channel, symbols)
+
+        if on_trade:
+            self.on("foreign", on_trade)
+
     async def subscribe_ohlc(
             self,
             symbols: List[str],
-            resolution: str = "1m",
+            resolution: Optional[str] = None,
             on_ohlc: Optional[Callable[[Ohlc], None]] = None, encoding="json"
     ) -> None:
-        channel = "ohlc." + resolution + ".json"
-        if encoding == "msgpack":
-            channel = "ohlc." + resolution + ".msgpack"
-        await self._subscribe_channel(channel, symbols)
+        # If resolution is None, subscribe to all resolutions
+        if resolution is None:
+            all_resolutions = ["1", "3", "5", "15", "30", "1H", "1D", "1W"]
+            for res in all_resolutions:
+                channel = "ohlc." + res + ".json"
+                if encoding == "msgpack":
+                    channel = "ohlc." + res + ".msgpack"
+                await self._subscribe_channel(channel, symbols)
+        else:
+            channel = "ohlc." + resolution + ".json"
+            if encoding == "msgpack":
+                channel = "ohlc." + resolution + ".msgpack"
+            await self._subscribe_channel(channel, symbols)
 
         if on_ohlc:
             self.on("ohlc", on_ohlc)
+
+    async def subscribe_ohlc_closed(
+            self,
+            symbols: List[str],
+            resolution: Optional[str] = None,
+            on_ohlc: Optional[Callable[[Ohlc], None]] = None, encoding="json"
+    ) -> None:
+        # If resolution is None, subscribe to all resolutions
+        if resolution is None:
+            all_resolutions = ["1", "3", "5", "15", "30", "1H", "1D", "1W"]
+            for res in all_resolutions:
+                channel = "ohlc_closed." + res + ".json"
+                if encoding == "msgpack":
+                    channel = "ohlc_closed." + res + ".msgpack"
+                await self._subscribe_channel(channel, symbols)
+        else:
+            channel = "ohlc_closed." + resolution + ".json"
+            if encoding == "msgpack":
+                channel = "ohlc_closed." + resolution + ".msgpack"
+            await self._subscribe_channel(channel, symbols)
+
+        if on_ohlc:
+            self.on("ohlc_closed", on_ohlc)
 
     async def subscribe_orders(
             self, on_order: Optional[Callable[[Order], None]] = None
@@ -360,14 +421,19 @@ class TradingClient:
 
     async def _message_handler(self) -> None:
         reconnect_attempt = 0
-        max_reconnect_delay = 60  # Maximum delay between reconnection attempts
+        max_reconnect_delay = 60
 
         while self._is_running:
             try:
                 async for message in self._connection:
                     data = self._decoder.decode(message)
-                    await self._dispatch_message(data)
-                    # Reset reconnect attempt counter on successful message
+                    data["_receivedAt"] = time.time()
+
+                    # Hash symbol → worker index để đảm bảo cùng 1 mã
+                    symbol = data.get("Symbol") or data.get("symbol") or ""
+                    worker_idx = hash(symbol) % self._num_workers
+                    await self._dispatch_queues[worker_idx].put(data)
+
                     reconnect_attempt = 0
             except ConnectionClosed as e:
                 logger.warning(f"Connection closed: {e}")
@@ -399,11 +465,9 @@ class TradingClient:
                 logger.error(f"Message handler error: {e}")
                 self._emit("error", e)
 
-                # Only retry if auto_reconnect is enabled
                 if not self.auto_reconnect:
                     break
 
-                # Check if this is a connection-related error
                 if self._is_connection_error(e):
                     reconnect_attempt += 1
 
@@ -412,11 +476,9 @@ class TradingClient:
                         self._emit("max_reconnect_exceeded", reconnect_attempt)
                         break
 
-                    # Exponential backoff: 1s, 2s, 4s, 8s, ... up to max_reconnect_delay
                     delay = min(2 ** (reconnect_attempt - 1), max_reconnect_delay)
                     logger.info(f"Connection error detected. Reconnecting in {delay}s (attempt {reconnect_attempt}/{self.max_retries})...")
 
-                    # Emit reconnecting event for user tracking
                     self._emit("reconnecting", {
                         "attempt": reconnect_attempt,
                         "max_retries": self.max_retries,
@@ -432,12 +494,26 @@ class TradingClient:
                         reconnect_attempt = 0
                     except Exception as reconnect_error:
                         logger.error(f"Reconnection failed: {reconnect_error}")
-                        # Continue loop to retry with increased backoff
                         continue
                 else:
-                    # Non-connection error, don't retry
                     logger.error(f"Non-recoverable error: {e}")
                     break
+
+    async def _dispatch_worker(self, worker_idx: int) -> None:
+        """
+        Each worker owns 1 queue. Symbol is hashed to worker_idx,
+        so same symbol always processed by same worker → message order guaranteed.
+        """
+        q = self._dispatch_queues[worker_idx]
+        while self._is_running:
+            try:
+                data = await asyncio.wait_for(q.get(), timeout=1.0)
+                await self._dispatch_message(data)
+                q.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Dispatch worker[{worker_idx}] error: {e}")
 
     def _is_connection_error(self, error: Exception) -> bool:
         """
@@ -628,6 +704,16 @@ class TradingClient:
 
         # Stop background tasks
         self._is_running = False
+
+        # Cancel dispatch workers
+        for worker in self._dispatch_worker_tasks:
+            if not worker.done():
+                worker.cancel()
+                try:
+                    await worker
+                except asyncio.CancelledError:
+                    pass
+        self._dispatch_worker_tasks.clear()
 
         # Cancel tasks
         if self._heartbeat_task and not self._heartbeat_task.done():

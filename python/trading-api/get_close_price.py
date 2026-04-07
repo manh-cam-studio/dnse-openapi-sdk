@@ -14,12 +14,7 @@ def main():
         base_url="https://openapi.dnse.com.vn",
     )
 
-    status, body = client.close_position(
-        position_id="replace-with-position-id",
-        market_type="DERIVATIVE",
-        trading_token="replace-with-trading-token",
-        dry_run=False,
-    )
+    status, body = client.get_close_price(symbol="GAS", board_id="G1", dry_run=False)
     print(status, body)
 
 

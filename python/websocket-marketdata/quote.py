@@ -6,6 +6,7 @@ This example shows how to receive real-time quote data for multiple symbols.
 """
 
 import asyncio
+from datetime import datetime
 
 from trading_websocket import TradingClient
 from trading_websocket.models import Quote
@@ -22,15 +23,16 @@ async def main():
     )
 
     def handle_quote(quote: Quote):
-        print(f"QUOTE: {quote}")
+        received_at = datetime.fromtimestamp(quote.receivedAt).strftime("%H:%M:%S.%f")[:-3] if quote.receivedAt else "N/A"
+        print(f"[{received_at}] QUOTE: {quote}")
 
     # Connect to gateway
     print("Connecting to WebSocket gateway...")
     await client.connect()
     print(f"Connected! Session ID: {client._session_id}\n")
 
-    print("Subscribing to quotes for SSI and 41I1G2000...")
-    await client.subscribe_quotes(["SSI", "41I1G2000"], on_quote=handle_quote, encoding=encoding, board_id="G1")
+    print("Subscribing to quotes for SSI and 41I1G4000...")
+    await client.subscribe_quotes(["SSI", "41I1G4000"], on_quote=handle_quote, encoding=encoding, board_id="G1")
 
     print("\nReceiving market data (will run for 1 hour)...\n")
 

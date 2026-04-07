@@ -8,6 +8,7 @@ This example shows how to receive real-time market data for multiple symbols.
 """
 
 import asyncio
+from datetime import datetime
 
 from trading_websocket import TradingClient
 from trading_websocket.models import Ohlc
@@ -24,14 +25,15 @@ async def main():
     )
 
     def handle_ohlc(ohlc: Ohlc):
-        print(f"OHLC: {ohlc}")
+        received_at = datetime.fromtimestamp(ohlc.receivedAt).strftime("%H:%M:%S.%f")[:-3] if ohlc.receivedAt else "N/A"
+        print(f"[{received_at}] OHLC: {ohlc}")
 
     # Connect to gateway
     print("Connecting to WebSocket gateway...")
     await client.connect()
     print(f"Connected! Session ID: {client._session_id}\n")
 
-    print("Subscribing to ohlc for SSI and 41I1G2000 and VN30...")
+    print("Subscribing to ohlc for SSI, VN30F1M and VN30...")
     # internal 1 3 5 15 30 1H 1D 1W
     await client.subscribe_ohlc(["SSI", "VN30F1M", "VN30"], resolution="1", on_ohlc=handle_ohlc, encoding=encoding)
 
