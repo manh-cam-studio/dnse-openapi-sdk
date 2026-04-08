@@ -1,0 +1,56 @@
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Chạy tự động hàng ngày vào 0h:00 UTC
+  workflow_dispatch: # Cho phép kích hoạt bằng tay
+
+permissions:
+  actions: write
+  contents: write
+  issues: write # Cấp quyền tạo Issue
+
+jobs:
+  sync_with_upstream:
+    name: Sync with dnse-tech/openapi-sdk
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Sync upstream changes
+        id: sync
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        with:
+          upstream_sync_repo: dnse-tech/openapi-sdk
+          upstream_sync_branch: main
+          target_sync_branch: develop
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          test_mode: false
+
+      - name: Notify Maintainers via Issue
+        if: steps.sync.outputs.has_new_commits == 'true'
+        run: |
+          gh issue create --title "⚠️ Upstream Sync: Yêu cầu nâng cấp Go và Rust SDK" \
+            --body "Hệ thống vừa đồng bộ thành công mã nguồn và tài liệu mới từ repository mẹ (\`dnse-tech/openapi-sdk\`).
+            
+            **Các công việc cần thiết cho Maintainer:**
+            - [ ] Đọc xem Repo chính (JS/Docs) đã có thêm API endpoint gì mới hay fix lỗi nào.
+            - [ ] Viết / Sửa mã nguồn tương ứng trong nhánh để cập nhật nâng cấp cho thư viện **Go**.
+            - [ ] Viết / Sửa mã nguồn tương ứng trong nhánh để cập nhật nâng cấp cho thư viện **Rust**.
+            - [ ] Chạy lại Unit Tests cục bộ ở Branch Develop.
+            - [ ] Đẩy (Push) Release Tag mới nhất (Ví dụ: \`go/vX.X.X\` và \`rust/vY.Y.Y\`) để kết thúc chu trình cập nhật.
+            
+            Sau khi hoàn thiện các Checklist trên, có thể đóng (Close) Issue này lại!" \
+            --label "enhancement"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for Failure
+        if: failure()
+        run: |
+          echo "::error::Đồng bộ hóa tự động thất bại do Conflict Code. Vui lòng kéo code về máy và tự resolve conflict thủ công!"
+          exit 1
