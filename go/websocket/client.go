@@ -2,15 +2,10 @@ package websocket
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 type Config struct {
@@ -27,8 +22,9 @@ type Config struct {
 type TradingClient struct {
 	config Config
 
-	conn       *websocket.Conn
-	connMutex  sync.Mutex
+	transport  Transport
+	serializer Serializer
+	dispatcher *Dispatcher
 	cancelFunc context.CancelFunc
 
 	isAuthenticated bool
@@ -37,6 +33,7 @@ type TradingClient struct {
 	done chan struct{}
 
 	subscriptions map[string]SubscriptionRequest
+	subsMutex     sync.Mutex
 
 	// Callbacks
 	OnTrade              func(Trade)
@@ -74,11 +71,17 @@ func NewTradingClientWithConfig(cfg Config) *TradingClient {
 	if cfg.Encoding == "" {
 		cfg.Encoding = "json"
 	}
-	return &TradingClient{
+
+	client := &TradingClient{
 		config:        cfg,
 		subscriptions: make(map[string]SubscriptionRequest),
 		done:          make(chan struct{}),
+		transport:     NewGorillaTransport(),
+		serializer:    GetSerializer(cfg.Encoding),
 	}
+
+	client.dispatcher = NewDispatcher(client, client.serializer)
+	return client
 }
 
 func (c *TradingClient) Connect(ctx context.Context) error {
@@ -87,18 +90,10 @@ func (c *TradingClient) Connect(ctx context.Context) error {
 
 	url := fmt.Sprintf("%s/v1/stream?encoding=%s", c.config.BaseURL, c.config.Encoding)
 
-	dialer := websocket.Dialer{
-		HandshakeTimeout: c.config.Timeout,
-	}
-
-	conn, _, err := dialer.DialContext(ctx, url, nil)
+	err := c.transport.Connect(ctx, url, c.config.Timeout)
 	if err != nil {
-		return fmt.Errorf("failed to connect: %w", err)
+		return err
 	}
-
-	c.connMutex.Lock()
-	c.conn = conn
-	c.connMutex.Unlock()
 
 	// Handle initial welcome message
 	var welcome map[string]interface{}
@@ -120,6 +115,7 @@ func (c *TradingClient) Connect(ctx context.Context) error {
 	}
 
 	go c.messageLoop(ctx)
+
 	if c.config.HeartbeatInterval > 0 {
 		go c.heartbeatLoop(ctx)
 	}
@@ -161,35 +157,25 @@ func (c *TradingClient) authenticate() error {
 }
 
 func (c *TradingClient) sendMessage(v interface{}) error {
-	c.connMutex.Lock()
-	defer c.connMutex.Unlock()
-
-	if c.conn == nil {
-		return errors.New("not connected")
+	data, err := c.serializer.Marshal(v)
+	if err != nil {
+		return err
 	}
-
+	// 2 is websocket.BinaryMessage in gorilla, 1 is TextMessage
+	msgType := 1
 	if c.config.Encoding == "msgpack" {
-		data, err := msgpack.Marshal(v)
-		if err != nil {
-			return err
-		}
-		return c.conn.WriteMessage(websocket.BinaryMessage, data)
-	} else {
-		return c.conn.WriteJSON(v)
+		msgType = 2
 	}
+	return c.transport.WriteMessage(msgType, data)
 }
 
 func (c *TradingClient) receiveMessage(v interface{}) error {
-	_, msg, err := c.conn.ReadMessage()
+	_, msg, err := c.transport.ReadMessage()
 	if err != nil {
 		return err
 	}
 
-	if c.config.Encoding == "msgpack" {
-		return msgpack.Unmarshal(msg, v)
-	} else {
-		return json.Unmarshal(msg, v)
-	}
+	return c.serializer.Unmarshal(msg, v)
 }
 
 func (c *TradingClient) messageLoop(ctx context.Context) {
@@ -199,135 +185,36 @@ func (c *TradingClient) messageLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			_, msg, err := c.conn.ReadMessage()
+			_, msgBytes, err := c.transport.ReadMessage()
 			if err != nil {
 				if c.OnError != nil {
 					c.OnError(err)
 				}
-				// Handle reconnection logic in production...
 				return
 			}
 
 			var raw map[string]interface{}
-			var mErr error
-			if c.config.Encoding == "msgpack" {
-				mErr = msgpack.Unmarshal(msg, &raw)
-			} else {
-				mErr = json.Unmarshal(msg, &raw)
-			}
-			
-			if mErr != nil {
+			if mErr := c.serializer.Unmarshal(msgBytes, &raw); mErr != nil {
 				if c.OnError != nil {
 					c.OnError(fmt.Errorf("failed to unmarshal message: %w", mErr))
 				}
 				continue
 			}
 
-			c.dispatchMessage(raw, msg)
-		}
-	}
-}
+			// Pre-process Ping/Pong
+			action, _ := raw["action"].(string)
+			if action == "" {
+				action, _ = raw["a"].(string)
+			}
+			
+			if action == "ping" {
+				_ = c.sendMessage(map[string]string{"action": "pong"})
+				continue
+			} else if action == "pong" || action == "subscribed" {
+				continue
+			}
 
-func (c *TradingClient) dispatchMessage(raw map[string]interface{}, rawMsg []byte) {
-	action, _ := raw["action"].(string)
-	if action == "" {
-		action, _ = raw["a"].(string)
-	}
-
-	if action == "ping" {
-		_ = c.sendMessage(map[string]string{"action": "pong"})
-		return
-	} else if action == "pong" || action == "subscribed" {
-		return
-	} else if action == "error" {
-		msg, _ := raw["message"].(string)
-		if c.OnError != nil {
-			c.OnError(fmt.Errorf("server error: %s", msg))
-		}
-		return
-	}
-
-	msgType, _ := raw["T"].(string)
-
-	var unmarshal func(interface{}) error
-	if c.config.Encoding == "msgpack" {
-		unmarshal = func(v interface{}) error { return msgpack.Unmarshal(rawMsg, v) }
-	} else {
-		unmarshal = func(v interface{}) error { return json.Unmarshal(rawMsg, v) }
-	}
-
-	switch msgType {
-	case "t":
-		if c.OnTrade != nil {
-			var obj Trade
-			_ = unmarshal(&obj)
-			c.OnTrade(obj)
-		}
-	case "te":
-		if c.OnTradeExtra != nil {
-			var obj TradeExtra
-			_ = unmarshal(&obj)
-			c.OnTradeExtra(obj)
-		}
-	case "e":
-		if c.OnExpectedPrice != nil {
-			var obj ExpectedPrice
-			_ = unmarshal(&obj)
-			c.OnExpectedPrice(obj)
-		}
-	case "sd":
-		if c.OnSecurityDefinition != nil {
-			var obj SecurityDefinition
-			_ = unmarshal(&obj)
-			c.OnSecurityDefinition(obj)
-		}
-	case "q":
-		if c.OnQuote != nil {
-			var obj Quote
-			_ = unmarshal(&obj)
-			c.OnQuote(obj)
-		}
-	case "b":
-		if c.OnOhlc != nil {
-			var obj Ohlc
-			_ = unmarshal(&obj)
-			c.OnOhlc(obj)
-		}
-	case "bc":
-		if c.OnOhlcClosed != nil {
-			var obj Ohlc
-			_ = unmarshal(&obj)
-			c.OnOhlcClosed(obj)
-		}
-	case "o":
-		if c.OnOrder != nil {
-			var obj Order
-			_ = unmarshal(&obj)
-			c.OnOrder(obj)
-		}
-	case "p":
-		if c.OnPosition != nil {
-			var obj Position
-			_ = unmarshal(&obj)
-			c.OnPosition(obj)
-		}
-	case "a":
-		if c.OnAccountUpdate != nil {
-			var obj AccountUpdate
-			_ = unmarshal(&obj)
-			c.OnAccountUpdate(obj)
-		}
-	case "mi":
-		if c.OnMarketIndex != nil {
-			var obj MarketIndex
-			_ = unmarshal(&obj)
-			c.OnMarketIndex(obj)
-		}
-	case "f":
-		if c.OnForeignInvestor != nil {
-			var obj ForeignInvestor
-			_ = unmarshal(&obj)
-			c.OnForeignInvestor(obj)
+			c.dispatcher.ProcessRawMessage(raw, msgBytes)
 		}
 	}
 }
@@ -353,12 +240,7 @@ func (c *TradingClient) Disconnect() {
 	if c.cancelFunc != nil {
 		c.cancelFunc()
 	}
-	c.connMutex.Lock()
-	defer c.connMutex.Unlock()
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
+	c.transport.Close()
 }
 
 func (c *TradingClient) Wait() {

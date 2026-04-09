@@ -1,12 +1,15 @@
-use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
-use url::Url;
+use tokio_tungstenite::tungstenite::Message;
+use std::error::Error;
 
 use super::auth::create_auth_message;
 use super::models::*;
 use super::subscriptions::{ChannelConfig, SubscriptionRequest};
+
+use super::transport::{Transport, TungsteniteTransport};
+use super::serializer::{get_serializer, Serializer};
+use super::dispatcher::DispatcherActor;
 
 #[derive(Clone)]
 pub struct Config {
@@ -47,7 +50,7 @@ impl TradingClient {
         self.event_rx.take()
     }
 
-    pub async fn send_raw(&self, req: SubscriptionRequest) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn send_raw(&self, req: SubscriptionRequest) -> Result<(), Box<dyn Error>> {
         let msg = serde_json::to_string(&req)?;
         if let Some(tx) = &self.outbound_tx {
             let _ = tx.send(Message::Text(msg.into()));
@@ -55,42 +58,44 @@ impl TradingClient {
         Ok(())
     }
 
-    pub async fn connect(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
         let url_str = format!("{}/v1/stream?encoding={}", self.config.base_url, self.config.encoding);
-        let url = Url::parse(&url_str)?;
 
-        let (ws_stream, _) = connect_async(url).await?;
-        let (mut write, mut read) = ws_stream.split();
+        let mut transport = Box::new(TungsteniteTransport::new());
+        transport.connect(&url_str).await?;
 
-        if let Some(msg) = read.next().await {
-            let msg = msg?;
-            let _ = msg.to_text()?;
-        }
-
-        let auth_msg = create_auth_message(&self.config.api_key, &self.config.api_secret);
-        write.send(Message::Text(serde_json::to_string(&auth_msg)?.into())).await?;
-
-        if let Some(msg) = read.next().await {
-            let msg = msg?;
-            let text = msg.to_text()?;
-            let raw: serde_json::Value = serde_json::from_str(text)?;
-            
-            let action = raw.get("action").or_else(|| raw.get("a")).and_then(|v| v.as_str());
-            if action == Some("auth_success") {
-                self.auth_success = true;
-            } else {
-                return Err(Box::from(format!("Auth failed: {:?}", text)));
-            }
-        }
-
-        // Outbound queue setup
+        // Extract reader and writer pipes 
+        // We use a local channel for outbound routing to allow multiple actors to write to transport
         let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
         self.outbound_tx = Some(out_tx.clone());
 
-        let write_arc = Arc::new(Mutex::new(write));
-        let w_clone1 = Arc::clone(&write_arc);
+        let mut in_rx = transport.take_receiver().ok_or("Failed to acquire input receiver")?;
 
-        // Subscriptions
+        // Authenticate (blocking)
+        let auth_msg = create_auth_message(&self.config.api_key, &self.config.api_secret);
+        transport.send(Message::Text(serde_json::to_string(&auth_msg)?.into())).await?;
+
+        // Read the welcome and auth messages
+        for _ in 0..2 {
+            if let Some(msg) = in_rx.recv().await {
+                if let Ok(text) = msg.to_text() {
+                    let raw: serde_json::Value = serde_json::from_str(text).unwrap_or(serde_json::json!({}));
+                    if let Some(action) = raw.get("action").or_else(|| raw.get("a")).and_then(|v| v.as_str()) {
+                        if action == "auth_success" {
+                            self.auth_success = true;
+                        } else if action == "auth_error" || action == "error" {
+                            return Err(Box::from(format!("Auth error: {}", text)));
+                        }
+                    }
+                }
+            }
+        }
+
+        if !self.auth_success {
+            return Err(Box::from("Failed to authenticate (no auth_success received)"));
+        }
+
+        // Subscriptions restore
         let subs = self.subscriptions.lock().await;
         if !subs.is_empty() {
             let req = SubscriptionRequest {
@@ -100,15 +105,16 @@ impl TradingClient {
             let _ = out_tx.send(Message::Text(serde_json::to_string(&req)?.into()));
         }
 
-        // Outbound sender loop
+        // Dedicated transport writer loop
         tokio::spawn(async move {
             while let Some(msg) = out_rx.recv().await {
-                let mut w = w_clone1.lock().await;
-                if w.send(msg).await.is_err() { break; }
+                if transport.send(msg).await.is_err() {
+                    break;
+                }
             }
         });
 
-        // Heartbeat worker 
+        // Heartbeat worker
         let out_tx_hb = out_tx.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(25));
@@ -120,51 +126,16 @@ impl TradingClient {
             }
         });
 
-        // Inbox event loop
-        let tx = self.event_tx.clone().unwrap();
-        let encoding = self.config.encoding.clone();
-        
-        tokio::spawn(async move {
-            while let Some(msg) = read.next().await {
-                let msg = match msg {
-                    Ok(m) => m,
-                    Err(_) => break,
-                };
-                if msg.is_close() { break; }
-                if msg.is_ping() || msg.is_pong() { continue; }
+        // Construct Solid Components
+        let serializer: Arc<dyn Serializer> = get_serializer(&self.config.encoding).into();
+        let dispatcher = DispatcherActor::new(
+            serializer,
+            self.event_tx.clone().unwrap(),
+            out_tx.clone()
+        );
 
-                if let Ok(text) = msg.to_text() {
-                    if encoding == "json" {
-                        if let Ok(raw) = serde_json::from_str::<serde_json::Value>(text) {
-                            let action = raw.get("action").or_else(|| raw.get("a")).and_then(|v| v.as_str());
-                            if action == Some("ping") {
-                                let _ = out_tx.send(Message::Text(serde_json::json!({"action": "pong"}).to_string().into()));
-                                continue;
-                            }
-                            if action == Some("pong") || action == Some("subscribed") { continue; }
-
-                            let t = raw.get("T").and_then(|v| v.as_str()).unwrap_or("");
-                            let event: Option<DnseWsEvent> = match t {
-                                "t" => serde_json::from_str(text).map(DnseWsEvent::Trade).ok(),
-                                "te" => serde_json::from_str(text).map(DnseWsEvent::TradeExtra).ok(),
-                                "q" => serde_json::from_str(text).map(DnseWsEvent::Quote).ok(),
-                                "b" => serde_json::from_str(text).map(DnseWsEvent::Ohlc).ok(),
-                                "bc" => serde_json::from_str(text).map(DnseWsEvent::OhlcClosed).ok(),
-                                "sd" => serde_json::from_str(text).map(DnseWsEvent::SecurityDefinition).ok(),
-                                "e" => serde_json::from_str(text).map(DnseWsEvent::ExpectedPrice).ok(),
-                                "o" => serde_json::from_str(text).map(DnseWsEvent::Order).ok(),
-                                "p" => serde_json::from_str(text).map(DnseWsEvent::Position).ok(),
-                                "f" => serde_json::from_str(text).map(DnseWsEvent::ForeignInvestor).ok(),
-                                "a" => serde_json::from_str(text).map(DnseWsEvent::AccountUpdate).ok(),
-                                "mi" => serde_json::from_str(text).map(DnseWsEvent::MarketIndex).ok(),
-                                _ => None,
-                            };
-                            if let Some(e) = event { let _ = tx.send(e); }
-                        }
-                    }
-                }
-            }
-        });
+        // Start dispatcher event loop non-blocking
+        dispatcher.start(in_rx);
 
         Ok(())
     }

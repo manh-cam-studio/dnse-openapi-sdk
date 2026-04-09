@@ -27,9 +27,9 @@ func (c *TradingClient) subscribeChannel(channelName string, symbols []string) e
 	}
 
 	// Store for reconnection logic
-	c.connMutex.Lock()
+	c.subsMutex.Lock()
 	c.subscriptions[channelName] = req
-	c.connMutex.Unlock()
+	c.subsMutex.Unlock()
 
 	return c.sendMessage(req)
 }
@@ -159,9 +159,9 @@ func (c *TradingClient) Unsubscribe(channelName string, symbols []string) error 
 		},
 	}
 
-	c.connMutex.Lock()
+	c.subsMutex.Lock()
 	delete(c.subscriptions, channelName) // Simplistic map update logic
-	c.connMutex.Unlock()
+	c.subsMutex.Unlock()
 
 	return c.sendMessage(req)
 }
