@@ -55,16 +55,4 @@ impl DnseClient {
         }
         self.request(Method::GET, &format!("/price/{}/close", symbol), Some(&query), None, None, dry_run).await
     }
-
-    pub async fn get_volume_profile(&self, symbol: &str, date: &str, board: i32, dry_run: bool) -> Result<(u16, Vec<u8>), Box<dyn std::error::Error>> {
-        let query = format!(r#"query GetKrxTicksStatsPerSideBySymbol {{ GetKrxTicksStatsPerSideBySymbol(symbol: "{}", date: "{}", board: {}) {{ price accumulatedVol buyVol sellVol unknownVol }} }}"#, symbol, date, board);
-        
-        let payload = serde_json::json!({
-            "operationName": "GetKrxTicksStatsPerSideBySymbol",
-            "query": query,
-            "variables": {}
-        });
-
-        self.request(Method::POST, "/price-api/query", None, Some(&payload), None, dry_run).await
-    }
 }

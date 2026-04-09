@@ -89,14 +89,3 @@ func (c *Client) GetClosePrice(symbol, boardID string, dryRun bool) (int, []byte
 	}
 	return c.Request("GET", fmt.Sprintf("/price/%s/close", symbol), query, nil, nil, dryRun)
 }
-
-// GetVolumeProfile retrieves the accumulated volume traded at each price level, split by Buy/Sell Volume (DNSE Tick Stats Per Side).
-func (c *Client) GetVolumeProfile(symbol, date string, board int, dryRun bool) (int, []byte, error) {
-	queryObj := fmt.Sprintf(`query GetKrxTicksStatsPerSideBySymbol { GetKrxTicksStatsPerSideBySymbol(symbol: "%s", date: "%s", board: %d) { price accumulatedVol buyVol sellVol unknownVol } }`, symbol, date, board)
-	payload := map[string]interface{}{
-		"operationName": "GetKrxTicksStatsPerSideBySymbol",
-		"query":         queryObj,
-		"variables":     map[string]interface{}{},
-	}
-	return c.Request("POST", "/price-api/query", nil, payload, nil, dryRun)
-}
